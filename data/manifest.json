@@ -1,0 +1,49 @@
+{
+  "created_utc": "2026-10-27T05:39:32.331202+00:00",
+  "config": {
+    "side": 10,
+    "initial_civilizations": 20,
+    "birth_rate_per_empty_star": 0.001,
+    "collapse_rate_per_civilization": 0.01,
+    "search_rate_per_civilization": 1.0,
+    "duration": 500.0,
+    "sample_interval": 0.5,
+    "discovery_probabilities": [
+      0.0,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      1.0
+    ],
+    "repetitions": 20,
+    "base_seed": 271026,
+    "replay_probabilities": [
+      0.0,
+      0.5,
+      1.0
+    ]
+  },
+  "versions": {
+    "python": "3.11.5 (v3.11.5:cce6ba91b3, Aug 24 2023, 10:50:31) [Clang 13.0.0 (clang-1300.0.29.30)]",
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "numpy": "2.4.6",
+    "matplotlib": "3.11.2"
+  },
+  "seed_rule": "base_seed + 10000 * probability_index + repetition (1..20)",
+  "sampling": "Counts are right-continuous, sampled every 0.5 model time units.",
+  "ci": "pointwise two-sided Student t interval, df=19; not a simultaneous band",
+  "replay_selection": "first repetition at p=0, 0.5, 1; fixed before inspecting outcomes",
+  "files": {
+    "code/check_model.py": "0dc6083d8e8953d6c1d47cb458b4ad81cb92407f8b6b669eacbee2bcaf59b218",
+    "code/model.py": "82d094f20f4b9304385a1e2a61368dc0198a690a406eff6d8b725c63ffe5e5d4",
+    "code/run_all.py": "2dfb0f93458821eef2071df61e033c4ef20d3fcccb6c24a7951844cb49301b72",
+    "code/validate_data.py": "c7a6a4a22b3c170d3f2e0d1646340ac86b3194bd6510fc6bf46e4beaef836b96",
+    "code/viewer_template.html": "703f20b87e4b77f3e9485cb43efa75a73ee4b0f10e0249ac7c32deb2eb74a2d3"
+  }
+}

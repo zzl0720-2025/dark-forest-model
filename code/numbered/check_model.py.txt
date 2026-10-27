@@ -1,0 +1,87 @@
+   1 | """Checks of event semantics, reproducibility, and known mathematical limits."""
+   2 | from dataclasses import replace
+   3 | import math
+   4 | import statistics
+   5 | import unittest
+   6 | from model import Parameters, simulate, rhs, equilibrium, ode_solution, stationary_distribution
+   7 | 
+   8 | 
+   9 | class ModelChecks(unittest.TestCase):
+  10 |     def test_events_and_replay_are_consistent(self):
+  11 |         p = Parameters(side=5, initial=15, birth=.03, collapse=.04,
+  12 |                        search=2, discovery=.8, duration=60)
+  13 |         trial = simulate(p, 240)
+  14 |         alive = set(trial.initial_sites)
+  15 |         last_time = 0
+  16 |         for event in trial.events:
+  17 |             self.assertGreater(event.time, last_time)
+  18 |             last_time = event.time
+  19 |             self.assertEqual(len(alive), event.count_before)
+  20 |             if event.kind == "birth":
+  21 |                 self.assertNotIn(event.target, alive)
+  22 |                 alive.add(event.target)
+  23 |             elif event.kind == "collapse":
+  24 |                 self.assertIn(event.source, alive)
+  25 |                 alive.remove(event.source)
+  26 |             else:
+  27 |                 self.assertIn(event.source, alive)
+  28 |                 self.assertNotEqual(event.source, event.target)
+  29 |                 if event.kind == "attack":
+  30 |                     self.assertIn(event.target, alive)
+  31 |                     alive.remove(event.target)
+  32 |                 elif event.kind == "empty_search":
+  33 |                     self.assertNotIn(event.target, alive)
+  34 |                 else:
+  35 |                     self.assertIn(event.target, alive)
+  36 |             self.assertEqual(len(alive), event.count_after)
+  37 |             self.assertLessEqual(len(alive), p.capacity)
+  38 |         self.assertEqual(len(alive), trial.final_count)
+  39 |         self.assertEqual(trial.final_count, p.initial + trial.births - trial.collapses - trial.attacks)
+  40 |         self.assertEqual(trial.events, simulate(p, 240).events)
+  41 | 
+  42 |     def test_zero_discovery_and_last_civilization(self):
+  43 |         p = Parameters(side=4, initial=8, discovery=0, duration=30)
+  44 |         self.assertEqual(simulate(p, 5).attacks, 0)
+  45 |         last = replace(p, initial=1, birth=0, collapse=0, discovery=1)
+  46 |         self.assertEqual(simulate(last, 9).final_count, 1)
+  47 |         empty = replace(last, initial=0)
+  48 |         self.assertEqual(simulate(empty, 9).final_count, 0)
+  49 | 
+  50 |     def test_analytic_solution_and_stability(self):
+  51 |         for prob in (0, .01, .5, 1):
+  52 |             p = Parameters(discovery=prob)
+  53 |             star = equilibrium(p)
+  54 |             self.assertAlmostEqual(rhs(star, p), 0, places=13)
+  55 |             for x0 in (0, .2, 1):
+  56 |                 self.assertAlmostEqual(ode_solution(0, x0, p), x0)
+  57 |                 for t in (.1, 10, 100):
+  58 |                     h = 1e-5
+  59 |                     x = ode_solution(t, x0, p)
+  60 |                     numerical = (ode_solution(t+h, x0, p) - ode_solution(t-h, x0, p))/(2*h)
+  61 |                     self.assertAlmostEqual(numerical, rhs(x, p), places=8)
+  62 |                     self.assertTrue(0 <= x <= 1)
+  63 | 
+  64 |     def test_stationary_detailed_balance(self):
+  65 |         for prob in (0, .5, 1):
+  66 |             p = Parameters(discovery=prob)
+  67 |             law = stationary_distribution(p)
+  68 |             self.assertAlmostEqual(sum(law), 1)
+  69 |             for n in range(p.capacity):
+  70 |                 up = law[n]*p.birth*(p.capacity-n)
+  71 |                 down = law[n+1]*(p.collapse*(n+1)+p.search*prob*(n+1)*n/(p.capacity-1))
+  72 |                 self.assertAlmostEqual(up, down, places=13)
+  73 |             if prob == 0:
+  74 |                 q = p.birth/(p.birth+p.collapse)
+  75 |                 self.assertAlmostEqual(sum(n*v for n,v in enumerate(law)), p.capacity*q)
+  76 | 
+  77 |     def test_no_attack_ensemble_matches_known_mean(self):
+  78 |         p = Parameters(side=5, initial=20, birth=.02, collapse=.03,
+  79 |                        search=0, discovery=0, duration=10)
+  80 |         outcomes = [simulate(p, seed).final_count for seed in range(500)]
+  81 |         exact = p.capacity*ode_solution(p.duration,p.initial/p.capacity,p)
+  82 |         se = statistics.stdev(outcomes)/math.sqrt(len(outcomes))
+  83 |         self.assertLess(abs(statistics.mean(outcomes)-exact), 4*se)
+  84 | 
+  85 | 
+  86 | if __name__ == "__main__":
+  87 |     unittest.main(verbosity=2)

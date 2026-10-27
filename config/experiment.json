@@ -1,0 +1,13 @@
+{
+  "side": 10,
+  "initial_civilizations": 20,
+  "birth_rate_per_empty_star": 0.001,
+  "collapse_rate_per_civilization": 0.01,
+  "search_rate_per_civilization": 1.0,
+  "duration": 500.0,
+  "sample_interval": 0.5,
+  "discovery_probabilities": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  "repetitions": 20,
+  "base_seed": 271026,
+  "replay_probabilities": [0.0, 0.5, 1.0]
+}

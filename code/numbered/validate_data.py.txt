@@ -1,0 +1,90 @@
+   1 | """Reconstruct every saved realization and audit the submitted experiment."""
+   2 | import csv
+   3 | import gzip
+   4 | import json
+   5 | from pathlib import Path
+   6 | from collections import Counter
+   7 | from bisect import bisect_right
+   8 | 
+   9 | ROOT=Path(__file__).resolve().parents[1]
+  10 | 
+  11 | 
+  12 | def main():
+  13 |     config=json.loads((ROOT/'config/experiment.json').read_text())
+  14 |     runs=list(csv.DictReader((ROOT/'data/runs.csv').open()))
+  15 |     parameters=Counter(float(run['p']) for run in runs)
+  16 |     assert len(runs)==220 and set(parameters.values())=={20}
+  17 |     assert len({int(run['seed']) for run in runs})==220
+  18 |     samples={}
+  19 |     with (ROOT/'data/trajectories.csv').open() as stream:
+  20 |         for row in csv.DictReader(stream):
+  21 |             samples.setdefault((float(row['p']),int(row['repetition'])),[]).append((float(row['time']),int(row['count'])))
+  22 |     total_events=0
+  23 |     for run in runs:
+  24 |         p=float(run['p'])
+  25 |         repetition=int(run['repetition'])
+  26 |         # The simulator's seed reproduces the initial locations, independently
+  27 |         # of any subsequently logged changes.
+  28 |         import random
+  29 |         initial=sorted(random.Random(int(run['seed'])).sample(range(config['side']**2),int(run['initial_count'])))
+  30 |         alive={site:index for index,site in enumerate(initial)}
+  31 |         known_ids=set(alive.values())
+  32 |         n=int(run['initial_count'])
+  33 |         previous=0
+  34 |         counts=Counter()
+  35 |         changes=[]
+  36 |         with gzip.open(ROOT/'data'/run['event_file'],'rt') as stream:
+  37 |             for event in csv.DictReader(stream):
+  38 |                 total_events+=1
+  39 |                 time=float(event['time'])
+  40 |                 assert previous<time<=config['duration']
+  41 |                 previous=time
+  42 |                 source,target=int(event['source']),int(event['target'])
+  43 |                 sid,tid=int(event['source_id']),int(event['target_id'])
+  44 |                 assert int(event['count_before'])==len(alive)==n
+  45 |                 kind=event['kind']
+  46 |                 if kind=='birth':
+  47 |                     assert target not in alive and tid not in known_ids
+  48 |                     alive[target]=tid
+  49 |                     known_ids.add(tid)
+  50 |                     counts['birth']+=1
+  51 |                 elif kind=='collapse':
+  52 |                     assert alive[source]==sid
+  53 |                     del alive[source]
+  54 |                     counts['collapse']+=1
+  55 |                 else:
+  56 |                     counts['search']+=1
+  57 |                     assert source!=target and alive[source]==sid
+  58 |                     if kind=='attack':
+  59 |                         assert p>0 and alive[target]==tid
+  60 |                         del alive[target]
+  61 |                         counts['attack']+=1
+  62 |                     elif kind=='empty_search':
+  63 |                         assert target not in alive and tid==-1
+  64 |                     else:
+  65 |                         assert kind=='undetected_search' and p<1 and alive[target]==tid
+  66 |                 after=len(alive)
+  67 |                 assert after==int(event['count_after'])
+  68 |                 if after!=n: changes.append((time,after))
+  69 |                 n=after
+  70 |         assert n==int(run['final_count'])
+  71 |         assert n==int(run['initial_count'])+counts['birth']-counts['collapse']-counts['attack']
+  72 |         for key,column in [('birth','births'),('collapse','collapses'),('attack','attacks'),('search','searches')]:
+  73 |             assert counts[key]==int(run[column])
+  74 |         change_times=[time for time,n in changes]
+  75 |         change_counts=[int(run['initial_count'])]+[n for time,n in changes]
+  76 |         for time,value in samples[(p,repetition)]:
+  77 |             assert value==change_counts[bisect_right(change_times,time)]
+  78 |     report={"status":"passed","runs":len(runs),"events_reconstructed":total_events,
+  79 |             "unique_seeds":220,"repetitions_per_probability":20,
+  80 |             "ever_empty_runs":sum(int(row['ever_empty']) for row in runs),
+  81 |             "empty_at_T_runs":sum(int(row['empty_at_T']) for row in runs),
+  82 |             "checks":["event chronology","unique civilization IDs","no self-attacks",
+  83 |                       "valid occupancy transitions","population accounting",
+  84 |                       "all sampled trajectories match event logs","220 unique seeds"]}
+  85 |     (ROOT/'data/validation.json').write_text(json.dumps(report,indent=2))
+  86 |     print(json.dumps(report,indent=2))
+  87 | 
+  88 | 
+  89 | if __name__=='__main__':
+  90 |     main()

@@ -1,0 +1,200 @@
+   1 | """Symmetric dark-forest model: exact individual events and a mean-field ODE."""
+   2 | from __future__ import annotations
+   3 | 
+   4 | from bisect import bisect_right
+   5 | from dataclasses import dataclass
+   6 | import math
+   7 | import random
+   8 | 
+   9 | 
+  10 | @dataclass(frozen=True)
+  11 | class Parameters:
+  12 |     side: int = 10
+  13 |     initial: int = 20
+  14 |     birth: float = 0.001
+  15 |     collapse: float = 0.01
+  16 |     search: float = 1.0
+  17 |     discovery: float = 0.5
+  18 |     duration: float = 500.0
+  19 |     sample_interval: float = 0.5
+  20 | 
+  21 |     @property
+  22 |     def capacity(self):
+  23 |         return self.side ** 2
+  24 | 
+  25 |     def __post_init__(self):
+  26 |         if self.side < 2 or not 0 <= self.initial <= self.capacity:
+  27 |             raise ValueError("Use side >= 2 and an initial count within capacity.")
+  28 |         if min(self.birth, self.collapse, self.search) < 0:
+  29 |             raise ValueError("Event rates must be nonnegative.")
+  30 |         if not 0 <= self.discovery <= 1:
+  31 |             raise ValueError("Discovery probability must be between zero and one.")
+  32 |         if self.duration <= 0 or self.sample_interval <= 0:
+  33 |             raise ValueError("Duration and sampling interval must be positive.")
+  34 | 
+  35 | 
+  36 | @dataclass(frozen=True)
+  37 | class Event:
+  38 |     time: float
+  39 |     kind: str
+  40 |     source: int
+  41 |     target: int
+  42 |     source_id: int
+  43 |     target_id: int
+  44 |     count_before: int
+  45 |     count_after: int
+  46 | 
+  47 | 
+  48 | @dataclass
+  49 | class Trial:
+  50 |     parameters: Parameters
+  51 |     seed: int
+  52 |     initial_sites: list[int]
+  53 |     events: list[Event]
+  54 |     sample_times: list[float]
+  55 |     sample_counts: list[int]
+  56 |     final_count: int
+  57 |     births: int
+  58 |     collapses: int
+  59 |     attacks: int
+  60 |     searches: int
+  61 |     empty_time: float
+  62 | 
+  63 | 
+  64 | def simulate(parameters: Parameters, seed: int) -> Trial:
+  65 |     """Gillespie events include all search attempts, including unsuccessful ones.
+  66 | 
+  67 |     Positions are fixed. A search chooses uniformly from all other stars;
+  68 |     visibility is tested only if the selected star contains another civilization.
+  69 |     IDs are unique to a civilization, even when a star is occupied again later.
+  70 |     """
+  71 |     p = parameters
+  72 |     rng = random.Random(seed)
+  73 |     initial_sites = sorted(rng.sample(range(p.capacity), p.initial))
+  74 |     alive = {site: index for index, site in enumerate(initial_sites)}
+  75 |     next_id = p.initial
+  76 |     events = []
+  77 |     counts = {"birth": 0, "collapse": 0, "attack": 0, "search": 0}
+  78 |     time = 0.0
+  79 |     empty_time = 0.0
+  80 | 
+  81 |     while time < p.duration:
+  82 |         n = len(alive)
+  83 |         birth_rate = p.birth * (p.capacity - n)
+  84 |         collapse_rate = p.collapse * n
+  85 |         search_rate = p.search * n
+  86 |         total_rate = birth_rate + collapse_rate + search_rate
+  87 |         if total_rate == 0:
+  88 |             if n == 0:
+  89 |                 empty_time += p.duration - time
+  90 |             break
+  91 |         next_time = time + rng.expovariate(total_rate)
+  92 |         if n == 0:
+  93 |             empty_time += min(next_time, p.duration) - time
+  94 |         if next_time > p.duration:
+  95 |             break
+  96 |         time = next_time
+  97 |         draw = rng.random() * total_rate
+  98 |         source = target = source_id = target_id = -1
+  99 |         if draw < birth_rate:
+ 100 |             empty_sites = [site for site in range(p.capacity) if site not in alive]
+ 101 |             target = rng.choice(empty_sites)
+ 102 |             target_id = next_id
+ 103 |             next_id += 1
+ 104 |             alive[target] = target_id
+ 105 |             kind = "birth"
+ 106 |             counts[kind] += 1
+ 107 |         elif draw < birth_rate + collapse_rate:
+ 108 |             source = rng.choice(sorted(alive))
+ 109 |             source_id = alive.pop(source)
+ 110 |             kind = "collapse"
+ 111 |             counts[kind] += 1
+ 112 |         else:
+ 113 |             source = rng.choice(sorted(alive))
+ 114 |             source_id = alive[source]
+ 115 |             target = rng.randrange(p.capacity - 1)
+ 116 |             if target >= source:
+ 117 |                 target += 1
+ 118 |             target_id = alive.get(target, -1)
+ 119 |             counts["search"] += 1
+ 120 |             if target_id < 0:
+ 121 |                 kind = "empty_search"
+ 122 |             elif rng.random() < p.discovery:
+ 123 |                 kind = "attack"
+ 124 |                 alive.pop(target)
+ 125 |                 counts[kind] += 1
+ 126 |             else:
+ 127 |                 kind = "undetected_search"
+ 128 |         events.append(Event(time, kind, source, target, source_id, target_id,
+ 129 |                             n, len(alive)))
+ 130 | 
+ 131 |     changes = [event for event in events if event.count_before != event.count_after]
+ 132 |     change_times = [event.time for event in changes]
+ 133 |     change_counts = [p.initial] + [event.count_after for event in changes]
+ 134 |     steps = int(round(p.duration / p.sample_interval))
+ 135 |     times = [index * p.sample_interval for index in range(steps + 1)]
+ 136 |     if times[-1] < p.duration - 1e-10:
+ 137 |         times.append(p.duration)
+ 138 |     times = [min(t, p.duration) for t in times if t <= p.duration + 1e-10]
+ 139 |     samples = [change_counts[bisect_right(change_times, t)] for t in times]
+ 140 |     return Trial(p, seed, initial_sites, events, times, samples, len(alive),
+ 141 |                  counts["birth"], counts["collapse"], counts["attack"],
+ 142 |                  counts["search"], empty_time)
+ 143 | 
+ 144 | 
+ 145 | def rhs(x, p: Parameters):
+ 146 |     return p.birth * (1 - x) - p.collapse * x - p.search * p.discovery * x * x
+ 147 | 
+ 148 | 
+ 149 | def equilibrium(p: Parameters):
+ 150 |     """Stable physical equilibrium, evaluated without cancellation near p=0."""
+ 151 |     a = p.search * p.discovery
+ 152 |     c = p.birth + p.collapse
+ 153 |     if p.birth == 0:
+ 154 |         return 0.0
+ 155 |     return 2 * p.birth / (c + math.sqrt(c * c + 4 * a * p.birth))
+ 156 | 
+ 157 | 
+ 158 | def ode_solution(time, x0, p: Parameters):
+ 159 |     """Closed-form solution of x'=b-(b+mu)x-a*x^2, b>0."""
+ 160 |     a = p.search * p.discovery
+ 161 |     c = p.birth + p.collapse
+ 162 |     if a == 0:
+ 163 |         if c == 0:
+ 164 |             return x0
+ 165 |         xstar = p.birth / c
+ 166 |         return xstar + (x0 - xstar) * math.exp(-c * time)
+ 167 |     discriminant = math.sqrt(c * c + 4 * a * p.birth)
+ 168 |     positive_root = equilibrium(p)
+ 169 |     negative_root = -(c + discriminant) / (2 * a)
+ 170 |     ratio = ((x0 - positive_root) / (x0 - negative_root)
+ 171 |              * math.exp(-discriminant * time))
+ 172 |     return (positive_root - ratio * negative_root) / (1 - ratio)
+ 173 | 
+ 174 | 
+ 175 | def stationary_distribution(p: Parameters):
+ 176 |     """Exact stationary count law of the finite, irreducible birth-death chain.
+ 177 | 
+ 178 |     lambda_n=b(M-n); delta_n=mu*n+s*p*n*(n-1)/(M-1).
+ 179 |     Every unsuccessful search is a state-preserving event and drops out here.
+ 180 |     """
+ 181 |     if p.birth <= 0 or p.collapse <= 0:
+ 182 |         raise ValueError("This stationary formula assumes b>0 and mu>0.")
+ 183 |     logs = [0.0]
+ 184 |     for n in range(1, p.capacity + 1):
+ 185 |         birth = p.birth * (p.capacity - n + 1)
+ 186 |         death = p.collapse * n + p.search * p.discovery * n * (n - 1) / (p.capacity - 1)
+ 187 |         logs.append(logs[-1] + math.log(birth / death))
+ 188 |     peak = max(logs)
+ 189 |     weights = [math.exp(value - peak) for value in logs]
+ 190 |     total = sum(weights)
+ 191 |     return [value / total for value in weights]
+ 192 | 
+ 193 | 
+ 194 | def parameters_from_config(config, discovery):
+ 195 |     return Parameters(side=config["side"], initial=config["initial_civilizations"],
+ 196 |                       birth=config["birth_rate_per_empty_star"],
+ 197 |                       collapse=config["collapse_rate_per_civilization"],
+ 198 |                       search=config["search_rate_per_civilization"],
+ 199 |                       discovery=discovery, duration=config["duration"],
+ 200 |                       sample_interval=config["sample_interval"])

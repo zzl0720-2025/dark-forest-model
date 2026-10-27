@@ -1,0 +1,18 @@
+{
+  "status": "passed",
+  "runs": 220,
+  "events_reconstructed": 553965,
+  "unique_seeds": 220,
+  "repetitions_per_probability": 20,
+  "ever_empty_runs": 44,
+  "empty_at_T_runs": 0,
+  "checks": [
+    "event chronology",
+    "unique civilization IDs",
+    "no self-attacks",
+    "valid occupancy transitions",
+    "population accounting",
+    "all sampled trajectories match event logs",
+    "220 unique seeds"
+  ]
+}
